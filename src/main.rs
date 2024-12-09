@@ -35,7 +35,12 @@ fn print(x: &[u8], name: &str) {
 struct Example {
     input: Vec<u8>,
     output: Vec<u8>,
-    wrong: Vec<Vec<u8>>,
+}
+
+fn mirror(mut example: Example) -> Example {
+    example.input.reverse();
+    example.output.reverse();
+    example
 }
 
 fn remove_duplicates_examples(examples: &mut Vec<Example>) {
@@ -43,20 +48,10 @@ fn remove_duplicates_examples(examples: &mut Vec<Example>) {
     examples.retain(|example| seen.insert(example.clone()));
 }
 
-fn remove_duplicates(example: &mut Example) {
-    let mut seen = HashSet::new();
-    example.wrong.retain(|vector| seen.insert(vector.clone()));
-}
-
-fn remove_wrong_wrongs(example: &mut Example) {
-    example.wrong.retain(|vector| *vector != example.input);
-}
-
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Default)]
 struct Example2D {
     input: Vec<Vec<u8>>,
     output: Vec<Vec<u8>>,
-    wrong: Vec<Vec<u8>>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Default)]
@@ -70,7 +65,6 @@ impl From<Example> for Example2D {
         Example2D {
             input: vec![x.input],
             output: vec![x.output],
-            wrong: x.wrong,
         }
     }
 }
@@ -82,81 +76,59 @@ pub fn save_json_to_file<T: Serialize>(t: &T, name: &str) {
     write!(file, "{}", json).unwrap();
 }
 
-fn main() {
-    let mut rng = rand::thread_rng();
-    let size = 12;
+fn task_1d_move_n_pix(size: usize, move_pix: usize, rng: &mut impl Rng) -> Example {
+    let block_size = rng.gen_range(1..size - move_pix);
+    let block_pos = rng.gen_range(0..=size - block_size - move_pix);
+    let color = random_color(rng);
 
-    let mut examples = vec![];
-    for _ in 0..1000000 {
-        let block_size = rng.gen_range(1..size - 1); // -1 is for moving left
-        let block_pos = rng.gen_range(0..=size - block_size - 1); // -1 is for moving left
-        let color = random_color(&mut rng);
+    let question = write_block(block_pos, block_size, color, gen_field(size));
+    let answer = write_block(block_pos + move_pix, block_size, color, gen_field(size));
 
-        let question = write_block(block_pos, block_size, color, gen_field(size));
-        let answer = write_block(block_pos+1, block_size, color, gen_field(size));
-        // print(&question, "qu");
-        // print(&answer, "an");
-
-        let mut wrongs = vec![];
-
-        if block_pos+2+block_size < size {
-            let wrong1 = write_block(block_pos+2, block_size, color, gen_field(size));
-            // print(&wrong1, "w1");
-            wrongs.push(wrong1);
-        }
-
-        if block_pos > 0 {
-            let wrong2 = write_block(block_pos-1, block_size, color, gen_field(size));
-            // print(&wrong2, "w2");
-            wrongs.push(wrong2);
-        }
-
-        let mut wrong3 = question.clone();
-        wrong3[block_pos+block_size] = color;
-        wrong3[block_pos+block_size-1] = 0;
-        // print(&wrong3, "w3");
-        wrongs.push(wrong3);
-
-        let wrong4 = write_block(block_pos+2, block_size-1, color, gen_field(size));
-        // print(&wrong4, "w4");
-        wrongs.push(wrong4);
-
-        let wrong5 = write_block(block_pos+1, block_size-1, color, gen_field(size));
-        // print(&wrong5, "w5");
-        wrongs.push(wrong5);
-
-        let wrong6 = write_block(block_pos+1, block_size, permute_color(color, &mut rng), gen_field(size));
-        // print(&wrong6, "w6");
-        wrongs.push(wrong6);
-
-        let wrong7 = write_block(block_pos, block_size+1, color, gen_field(size));
-        // print(&wrong7, "w7");
-        wrongs.push(wrong7);
-
-        let mut example = Example {
-            input: question,
-            output: answer,
-            wrong: wrongs,
-        };
-        remove_duplicates(&mut example);
-        remove_wrong_wrongs(&mut example);
-
-        examples.push(example);
-        
-        // println!();
+    Example {
+        input: question,
+        output: answer,
     }
+}
 
+fn generate_task<F: FnMut() -> Example>(mut f: F) -> Vec<Example> {
+    let mut examples = vec![];
+    for _ in 0..1000 {
+        examples.push(f());
+    }
     remove_duplicates_examples(&mut examples);
     examples.sort_by_key(|x| x.input.clone());
+    examples
+}
 
-    dbg!(examples.len());
+fn mkdir(dir: &str) {
+    if !std::fs::exists(dir).unwrap() {
+        std::fs::create_dir(dir).unwrap();
+    }
+}
 
+fn save_task(name: &str, examples: Vec<Example>) {
+    mkdir("tasks");
+    mkdir(&format!("tasks/{name}"));
     for (i, example) in examples.into_iter().enumerate() {
         let task = ArcTask2D {
             train: vec![],
             test: vec![example.into()],
         };
 
-        save_json_to_file(&task, &format!("tasks/1d_move_1_pix_{i}.json"));
+        save_json_to_file(&task, &format!("tasks/{name}/{i}.json"));
     }
+}
+
+fn main() {
+    let mut rng = rand::thread_rng();
+    let size = 12;
+
+    save_task("move_1pix_right", generate_task(|| task_1d_move_n_pix(size, 1, &mut rng)));
+    save_task("move_2pix_right", generate_task(|| task_1d_move_n_pix(size, 2, &mut rng)));
+    save_task("move_3pix_right", generate_task(|| task_1d_move_n_pix(size, 3, &mut rng)));
+    save_task("move_4pix_right", generate_task(|| task_1d_move_n_pix(size, 4, &mut rng)));
+    save_task("move_1pix_left", generate_task(|| mirror(task_1d_move_n_pix(size, 1, &mut rng))));
+    save_task("move_2pix_left", generate_task(|| mirror(task_1d_move_n_pix(size, 2, &mut rng))));
+    save_task("move_3pix_left", generate_task(|| mirror(task_1d_move_n_pix(size, 3, &mut rng))));
+    save_task("move_4pix_left", generate_task(|| mirror(task_1d_move_n_pix(size, 4, &mut rng))));
 }
