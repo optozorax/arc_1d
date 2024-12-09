@@ -1,0 +1,9 @@
+[package]
+name = "arc_1d"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8.5"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
