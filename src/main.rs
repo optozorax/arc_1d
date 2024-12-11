@@ -8,17 +8,49 @@ fn random_color(rng: &mut impl Rng) -> u8 {
     rng.gen_range(1..=COLORS)
 }
 
+fn random_color_two(rng: &mut impl Rng) -> u8 {
+    rng.gen_range(1..=2)
+}
+
 fn permute_color(color: u8, rng: &mut impl Rng) -> u8 {
     (color + rng.gen_range(1..=COLORS)) % (COLORS + 1)
 }
 
 fn gen_field(size: usize) -> Vec<u8> {
-    (0..size).map(|_| 0).collect()
+    gen_field_color(size, 0)
 }
 
-fn write_block(pos: usize, size: usize, color: u8, mut field: Vec<u8>) -> Vec<u8> {
-    for i in 0..size {
-        field[pos + i] = color;
+fn gen_random_field(size: usize, rng: &mut impl Rng) -> Vec<u8> {
+    (0..size).map(|_| random_color(rng)).collect()
+}
+
+fn gen_random_sparse_field(size: usize, density: f64, rng: &mut impl Rng) -> Vec<u8> {
+    (0..size).map(|_| if rng.gen_range(0.0..1.0) < density { random_color(rng) } else { 0 }).collect()
+}
+
+fn gen_random_sparse_field_two_colors(size: usize, density: f64, rng: &mut impl Rng) -> Vec<u8> {
+    (0..size).map(|_| if rng.gen_range(0.0..1.0) < density { random_color_two(rng) } else { 0 }).collect()
+}
+
+fn gen_field_color(size: usize, color: u8) -> Vec<u8> {
+    (0..size).map(|_| color).collect()
+}
+
+fn write_block(pos: usize, block: &[u8], mut field: Vec<u8>) -> Vec<u8> {
+    for (i, color) in block.iter().enumerate() {
+        field[pos + i] = *color;
+    }
+    field
+}
+
+fn remove_color(color: u8, field: Vec<u8>) -> Vec<u8> {
+    field.into_iter().filter(|x| *x != color).collect::<Vec<_>>()
+}
+
+fn write_block_wrapped(pos: usize, block: &[u8], mut field: Vec<u8>) -> Vec<u8> {
+    let len = field.len();
+    for (i, color) in block.iter().enumerate() {
+        field[(pos + i) % len] = *color;
     }
     field
 }
@@ -37,9 +69,13 @@ struct Example {
     output: Vec<u8>,
 }
 
-fn mirror(mut example: Example) -> Example {
+fn task_mirror(mut example: Example) -> Example {
     example.input.reverse();
     example.output.reverse();
+    example
+}
+
+fn task_identity(example: Example) -> Example {
     example
 }
 
@@ -76,13 +112,71 @@ pub fn save_json_to_file<T: Serialize>(t: &T, name: &str) {
     write!(file, "{}", json).unwrap();
 }
 
-fn task_1d_move_n_pix(size: usize, move_pix: usize, rng: &mut impl Rng) -> Example {
+fn task_move_n_pix(size: usize, move_pix: usize, solid: bool, rng: &mut impl Rng) -> Example {
     let block_size = rng.gen_range(1..size - move_pix);
     let block_pos = rng.gen_range(0..=size - block_size - move_pix);
-    let color = random_color(rng);
+    let block = if solid {
+        gen_field_color(block_size, random_color(rng))
+    } else {
+        gen_random_field(block_size, rng)
+    };
 
-    let question = write_block(block_pos, block_size, color, gen_field(size));
-    let answer = write_block(block_pos + move_pix, block_size, color, gen_field(size));
+    let question = write_block(block_pos, &block, gen_field(size));
+    let answer = write_block(block_pos + move_pix, &block, gen_field(size));
+
+    Example {
+        input: question,
+        output: answer,
+    }
+}
+
+fn task_move_n_pix_wrapped(size: usize, move_pix: usize, solid: bool, rng: &mut impl Rng) -> Example {
+    let block_size = rng.gen_range(1..size);
+    let block_pos = rng.gen_range(0..size);
+    let block = if solid {
+        gen_field_color(block_size, random_color(rng))
+    } else {
+        gen_random_field(block_size, rng)
+    };
+
+    let question = write_block_wrapped(block_pos, &block, gen_field(size));
+    let answer = write_block_wrapped(block_pos + move_pix, &block, gen_field(size));
+
+    Example {
+        input: question,
+        output: answer,
+    }
+}
+
+fn task_gravity(size: usize, rng: &mut impl Rng) -> Example {
+    let question = gen_random_sparse_field(size, 0.5, rng);
+    let q = remove_color(0, question.clone());
+    let answer = write_block(size - q.len(), &q, gen_field(size));
+
+    Example {
+        input: question,
+        output: answer,
+    }
+}
+
+fn task_gravity_counting(size: usize, rng: &mut impl Rng) -> Example {
+    let question = gen_random_sparse_field(size, 0.5, rng);
+    let q_len = remove_color(0, question.clone()).len();
+    let block = gen_field_color(q_len, 1);
+    let answer = write_block(0, &block, gen_field(size));
+
+    Example {
+        input: question,
+        output: answer,
+    }
+}
+
+
+fn task_gravity_antigravity(size: usize, rng: &mut impl Rng) -> Example {
+    let question = gen_random_sparse_field_two_colors(size, 0.5, rng);
+    let q1 = remove_color(2, remove_color(0, question.clone()));
+    let q2 = remove_color(1, remove_color(0, question.clone()));
+    let answer = write_block(0, &q1, write_block(size - q2.len(), &q2, gen_field(size)));
 
     Example {
         input: question,
@@ -123,12 +217,21 @@ fn main() {
     let mut rng = rand::thread_rng();
     let size = 12;
 
-    save_task("move_1pix_right", generate_task(|| task_1d_move_n_pix(size, 1, &mut rng)));
-    save_task("move_2pix_right", generate_task(|| task_1d_move_n_pix(size, 2, &mut rng)));
-    save_task("move_3pix_right", generate_task(|| task_1d_move_n_pix(size, 3, &mut rng)));
-    save_task("move_4pix_right", generate_task(|| task_1d_move_n_pix(size, 4, &mut rng)));
-    save_task("move_1pix_left", generate_task(|| mirror(task_1d_move_n_pix(size, 1, &mut rng))));
-    save_task("move_2pix_left", generate_task(|| mirror(task_1d_move_n_pix(size, 2, &mut rng))));
-    save_task("move_3pix_left", generate_task(|| mirror(task_1d_move_n_pix(size, 3, &mut rng))));
-    save_task("move_4pix_left", generate_task(|| mirror(task_1d_move_n_pix(size, 4, &mut rng))));
+    let mirrors = [("right", task_identity as fn(Example) -> Example), ("left", task_mirror as fn(Example) -> Example)];
+
+    for pixels in 1..=4 {
+        for (dir, conversion) in mirrors.clone() {
+            for (style, solid) in [("solid", true), ("colorful", false)] {
+                save_task(&format!("move_{pixels}pix_{style}_{dir}"), generate_task(|| conversion(task_move_n_pix(size, pixels, solid, &mut rng))));
+                save_task(&format!("move_{pixels}pix_{style}_{dir}_wrapped"), generate_task(|| conversion(task_move_n_pix_wrapped(size, pixels, solid, &mut rng))));
+            }
+        }
+    }
+
+    for (dir, conversion) in mirrors.clone() {
+        save_task(&format!("gravity_{dir}"), generate_task(|| conversion(task_gravity(size, &mut rng))));
+        save_task(&format!("gravity_antigravity_{dir}"), generate_task(|| conversion(task_gravity_antigravity(size, &mut rng))));
+        save_task(&format!("gravity_counting_{dir}"), generate_task(|| conversion(task_gravity_counting(size, &mut rng))));
+        
+    }
 }
