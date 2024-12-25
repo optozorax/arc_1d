@@ -1,0 +1,41 @@
+name: Deploy Visualizations
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Build and Run
+        run: |
+          cargo build --release
+          cargo run --release
+
+      - name: Setup Pages Branch
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch
+          git checkout gh-pages || git checkout -b gh-pages
+
+      - name: Copy and Commit
+        run: |
+          rm -rf docs
+          mkdir -p docs
+          cp -r visualization/* docs/
+          git add docs
+          git commit -m "Update visualizations" || echo "No changes to commit"
+          git push origin gh-pages -f
