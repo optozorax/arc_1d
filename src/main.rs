@@ -7,11 +7,15 @@ use rand::prelude::SliceRandom;
 
 // ---------------------------------------------------------------------------
 
+const COLORS: u8 = 9;
+const ADD_TRAIN_DATA: bool = true;
+const GRID_SIZE: usize = 12;
+
+// ---------------------------------------------------------------------------
+
 // This code generates some 1D random riddles, with question and answer.
 
 // Helper functions
-
-const COLORS: u8 = 9;
 
 fn random_color(rng: &mut StdRng) -> u8 {
     rng.gen_range(1..=COLORS)
@@ -70,14 +74,6 @@ fn write_block_wrapped(pos: usize, block: &[u8], mut field: Vec<u8>) -> Vec<u8> 
         field[(pos + i) % len] = *color;
     }
     field
-}
-
-fn print(x: &[u8], name: &str) {
-    print!("{name}: ");
-    for i in x {
-        print!("{i}");
-    }
-    println!();
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Default, Hash, Eq)]
@@ -1438,12 +1434,23 @@ fn mkdir(dir: &str) {
 }
 
 fn save_task(name: &str, examples: Vec<Example>) {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
     mkdir("tasks");
     mkdir(&format!("tasks/{name}"));
-    for (i, example) in examples.into_iter().enumerate() {
+    for (i, example) in examples.iter().enumerate() {
         let task = ArcTask2D {
-            train: vec![],
-            test: vec![example.into()],
+            train: if ADD_TRAIN_DATA { 
+                examples
+                    .choose_multiple(&mut rng, 4)
+                    .cloned()
+                    .filter(|x| x != example)
+                    .map(|x| Example2D::from(x))
+                    .collect()
+            } else {
+                vec![] 
+            },
+            test: vec![example.clone().into()],
         };
 
         save_json_to_file(&task, &format!("tasks/{name}/{i}.json"));
@@ -1780,7 +1787,7 @@ fn main() {
     fs::create_dir_all("tasks").unwrap();
 
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-    let size = 12;
+    let size = GRID_SIZE;
 
     let mirrors = [("right", task_identity as fn(Example) -> Example), ("left", task_mirror as fn(Example) -> Example)];
     let inverses = [("", task_identity as fn(Example) -> Example), ("_inv", task_inverse as fn(Example) -> Example)];
