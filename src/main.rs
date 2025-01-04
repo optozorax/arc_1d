@@ -1448,6 +1448,130 @@ fn save_task(name: &str, examples: Vec<Example>) {
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
+fn get_background_mask(grid: &[i64], background: i64) -> Vec<bool> {
+    grid.iter().map(|&i| i == background).collect()
+}
+
+fn count_non_background(mask: &[bool]) -> usize {
+    mask.iter().filter(|&&x| !x).count()
+}
+
+fn count_colors(grid: &[i64]) -> Vec<usize> {
+    let mut res = vec![0; COLORS as usize + 1];
+    for &i in grid {
+        res[i as usize] += 1;
+    }
+    res
+}
+
+fn empty_palette() -> Vec<bool> {
+    vec![false; COLORS as usize + 1]
+}
+
+fn convert_to_palette(colors_count: &[usize]) -> Vec<bool> {
+    colors_count.iter().map(|&count| count != 0).collect()
+}
+
+fn or_palette(palette1: &[bool], palette2: &[bool]) -> Vec<bool> {
+    palette1.iter().zip(palette2.iter())
+        .map(|(&a, &b)| a || b)
+        .collect()
+}
+
+fn get_new_colors(palette_prev: &[bool], palette_new: &[bool]) -> Vec<bool> {
+    palette_prev.iter().zip(palette_new.iter())
+        .map(|(&prev, &new)| !prev && new)
+        .collect()
+}
+
+fn is_subset_palette(palette: &[bool], palette_sub: &[bool]) -> bool {
+    palette.iter().zip(palette_sub.iter()).all(|(&full, &sub)| !sub || full)
+}
+
+fn calc_invariants(task_datas: &[Value]) -> (bool, bool, bool, bool, bool, Vec<bool>, Vec<bool>) {
+    let mut same_mask_all = true;
+    let mut same_count_all = true;
+    let mut same_colors_all = true;
+    let mut same_palette_all = true;
+    let mut subset_palette_all = true;
+    let mut palette_output_all = empty_palette();
+    let mut palette_new_colors_all = empty_palette();
+    let background = 0;
+
+    for task_data in task_datas {
+        if let Some(test_cases) = task_data["test"].as_array() {
+            for test_case in test_cases {
+                let input = test_case["input"][0].as_array().unwrap()
+                    .iter()
+                    .map(|v| v.as_i64().unwrap())
+                    .collect::<Vec<_>>();
+                
+                let output = test_case["output"][0].as_array().unwrap()
+                    .iter()
+                    .map(|v| v.as_i64().unwrap())
+                    .collect::<Vec<_>>();
+
+                let mask_input = get_background_mask(&input, background);
+                let count_input = count_non_background(&mask_input);
+                let mut colors_input = count_colors(&input);
+                colors_input[background as usize] = 0;
+                let palette_input = convert_to_palette(&colors_input);
+
+                let mask_output = get_background_mask(&output, background);
+                let count_output = count_non_background(&mask_output);
+                let mut colors_output = count_colors(&output);
+                colors_output[background as usize] = 0;
+                let palette_output = convert_to_palette(&colors_output);
+
+                let same_mask = mask_input == mask_output;
+                let same_count = count_input == count_output;
+                let same_colors = colors_input == colors_output;
+                let same_palette = palette_input == palette_output;
+                let subset_palette = is_subset_palette(&palette_input, &palette_output);
+
+                same_mask_all &= same_mask;
+                same_count_all &= same_count;
+                same_colors_all &= same_colors;
+                same_palette_all &= same_palette;
+                subset_palette_all &= subset_palette;
+
+                let palette_new_colors = get_new_colors(&palette_input, &palette_output);
+
+                palette_output_all = or_palette(&palette_output_all, &palette_output);
+                palette_new_colors_all = or_palette(&palette_new_colors_all, &palette_new_colors);
+            }
+        }
+    }
+
+    (
+        same_mask_all,
+        same_count_all,
+        same_colors_all,
+        same_palette_all,
+        subset_palette_all,
+        palette_output_all,
+        palette_new_colors_all
+    )
+}
+
+fn create_palette_html(text: &str, palette: &[bool]) -> String {
+    if !palette.iter().any(|x| *x) {
+        return Default::default();
+    }
+    let mut html = format!(r#"<div>{text}:</div><div class="palette">"#);
+    for (i, &present) in palette.iter().enumerate() {
+        if present {
+            html.push_str(&format!(r#"<div class="cell color-{}"></div>"#, i));
+        }
+    }
+    html.push_str("</div>");
+    html
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -1507,7 +1631,6 @@ h3 {
     word-break: break-all;
     word-wrap: anywhere;
     white-space: normal;
-    max-width: 250px;
     height: 35pt;
     margin: 0px;
 }
@@ -1586,6 +1709,32 @@ a:hover {
 
 p {
     margin: 0px;
+}
+
+.invariants-container {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.invariant {
+    display: inline-block;
+    margin: 2px 5px;
+    padding: 2px 6px;
+    background-color: #262626;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.palette-container {
+    margin-top: 10px;
+}
+
+.palette {
+    display: flex;
+    gap: 2px;
+    margin: 5px 0;
 }
 "#;
 
@@ -1701,9 +1850,42 @@ fn generate_index_page(tasks_dir: &Path, output_dir: &Path) -> std::io::Result<(
         let all_files: Vec<Value> = serde_json::from_str(&content)?;
 
         if !all_files.is_empty() {
+
             index_html.push_str(&format!(
                 r#"<div class="task"><h3><a href="{}.html">{}</a></h3>"#,
-                task_dir, task_dir
+                task_dir, task_dir.strip_suffix(".json").unwrap()
+            ));
+
+            let (same_mask_all, same_count_all, same_colors_all, same_palette_all, subset_palette_all, palette_output_all, palette_new_colors_all) = calc_invariants(&all_files);
+            let mut invariants_html = String::new();
+            if same_mask_all {
+                invariants_html.push_str("<div class='invariant'>Same mask</div>");
+            }
+            if same_count_all {
+                invariants_html.push_str("<div class='invariant'>Same count</div>");
+            }
+            if same_colors_all {
+                invariants_html.push_str("<div class='invariant'>Same colors</div>");
+            }
+            if same_palette_all {
+                invariants_html.push_str("<div class='invariant'>Same palette</div>");
+            }
+            if subset_palette_all {
+                invariants_html.push_str("<div class='invariant'>Subset palette</div>");
+            }
+            index_html.push_str(&format!(
+                r#"
+                <div class="invariants-container">
+                    {}
+                    <div class="palette-container">
+                        {}
+                        {}
+                    </div>
+                </div>
+                "#,
+                invariants_html,
+                create_palette_html("Output palette", &palette_output_all),
+                create_palette_html("New colors", &palette_new_colors_all)
             ));
             
             let files_count = all_files.len();
