@@ -541,7 +541,7 @@ fn task_block_and_noise_remove_inside(size: usize, rng: &mut StdRng) -> Option<E
     for i in 0..block_size {
         field[block_pos + i] = c;
     }
-    let max_noise = (size / 3-1).max(1);
+    let max_noise = (block_size / 2-1).max(1);
     let noise_count = rng.gen_range(1..=max_noise);
     let mut indices: Vec<usize> = (0..block_size).collect();
     indices.shuffle(rng);
@@ -896,7 +896,7 @@ fn task_recolor_blocks_from_palette(size: usize, rng: &mut StdRng) -> Option<Exa
     // Generate blocks of same size
     let block_size = rng.gen_range(2..=4);
     let mut blocks = Vec::new();
-    let mut pos = block_size + 1;  // Leave space for color palette
+    let mut pos = 0;
     
     while pos + block_size <= size {
         if rng.gen_bool(0.4) {
@@ -905,6 +905,20 @@ fn task_recolor_blocks_from_palette(size: usize, rng: &mut StdRng) -> Option<Exa
         } else {
             pos += 1;
         }
+    }
+
+    loop {
+        let palette_size = blocks.len();
+        if blocks.last()? + block_size + palette_size + 1 >= size {
+            blocks.pop();
+        } else {
+            break;
+        }
+    }
+
+    let palette_size = blocks.len();
+    for block in &mut blocks {
+        *block += palette_size + 1;
     }
     
     if blocks.is_empty() { return None; }
