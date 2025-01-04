@@ -1409,8 +1409,8 @@ fn save_task(name: &str, examples: Vec<Example>) {
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
     mkdir("tasks");
-    mkdir(&format!("tasks/{name}"));
-    for (i, example) in examples.iter().enumerate() {
+    let mut tasks = vec![];
+    for example in examples.iter() {
         let task = ArcTask2D {
             train: if ADD_TRAIN_DATA { 
                 examples
@@ -1425,9 +1425,9 @@ fn save_task(name: &str, examples: Vec<Example>) {
             },
             test: vec![example.clone().into()],
         };
-
-        save_json_to_file(&task, &format!("tasks/{name}/{i}.json"));
+        tasks.push(task);
     }
+    save_json_to_file(&tasks, &format!("tasks/{name}.json"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1438,7 +1438,6 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use serde_json::Value;
-use glob::glob;
 
 const CELL_SIZE: u32 = 15;
 const INDEX_TAKE_JSONS: usize = 5;
@@ -1624,11 +1623,9 @@ fn create_task_html(task_data: &Value, task_name: &str) -> String {
 
 fn generate_single_task_page(task_path: &Path, output_dir: &Path) -> std::io::Result<PathBuf> {
     let task_name = task_path.file_name().unwrap().to_string_lossy();
-    let pattern = task_path.join("*.json");
-    let all_files: Vec<_> = glob(pattern.to_str().unwrap())
-        .unwrap()
-        .filter_map(Result::ok)
-        .collect();
+
+    let content = fs::read_to_string(&task_path)?;
+    let all_files: Vec<Value> = serde_json::from_str(&content)?;
     
     let mut task_html = format!(
         r#"
@@ -1647,11 +1644,8 @@ fn generate_single_task_page(task_path: &Path, output_dir: &Path) -> std::io::Re
         task_name, CSS_TEMPLATE, task_name, all_files.len()
     );
     
-    for file_path in all_files {
-        let content = fs::read_to_string(&file_path)?;
-        let task_data: Value = serde_json::from_str(&content)?;
-        let file_name = file_path.file_name().unwrap().to_string_lossy();
-        task_html.push_str(&create_task_html(&task_data, &file_name));
+    for (i, task_data) in all_files.iter().enumerate() {
+        task_html.push_str(&create_task_html(&task_data, &i.to_string()));
     }
     
     task_html.push_str(
@@ -1688,34 +1682,23 @@ fn generate_index_page(tasks_dir: &Path, output_dir: &Path) -> std::io::Result<(
     for entry in fs::read_dir(tasks_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() {
-            let task_dir = path.file_name().unwrap().to_string_lossy();
-            let pattern = path.join("*.json");
-            let json_files: Vec<_> = glob(pattern.to_str().unwrap())
-                .unwrap()
-                .filter_map(Result::ok)
-                .take(INDEX_TAKE_JSONS)
-                .collect();
+        let task_dir = path.file_name().unwrap().to_string_lossy();
+        let content = fs::read_to_string(&path)?;
+        let all_files: Vec<Value> = serde_json::from_str(&content)?;
+
+        if !all_files.is_empty() {
+            index_html.push_str(&format!(
+                r#"<div class="task"><h3><a href="{}.html">{}</a></h3>"#,
+                task_dir, task_dir
+            ));
             
-            if !json_files.is_empty() {
-                index_html.push_str(&format!(
-                    r#"<div class="task"><h3><a href="{}.html">{}</a></h3>"#,
-                    task_dir, task_dir
-                ));
-                
-                let files_count = glob(path.join("*.json").to_str().unwrap())
-                    .unwrap()
-                    .count();
-                index_html.push_str(&format!(r#"<center><p>({} files)</p></center>"#, files_count));
-                
-                for json_file in json_files {
-                    let content = fs::read_to_string(&json_file)?;
-                    let task_data: Value = serde_json::from_str(&content)?;
-                    let file_name = json_file.file_name().unwrap().to_string_lossy();
-                    index_html.push_str(&create_task_html(&task_data, &file_name));
-                }
-                index_html.push_str("</div>");
+            let files_count = all_files.len();
+            index_html.push_str(&format!(r#"<center><p>({} files)</p></center>"#, files_count));
+            
+            for (i, json_file) in all_files.iter().enumerate().take(INDEX_TAKE_JSONS) {
+                index_html.push_str(&create_task_html(&json_file, &i.to_string()));
             }
+            index_html.push_str("</div>");
         }
     }
     
@@ -1741,9 +1724,7 @@ fn draw() -> std::io::Result<()> {
     for entry in fs::read_dir(tasks_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_dir() {
-            generate_single_task_page(&path, output_dir)?;
-        }
+        generate_single_task_page(&path, output_dir)?;
     }
     
     generate_index_page(tasks_dir, output_dir)?;
