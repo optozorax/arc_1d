@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use std::collections::HashSet;
@@ -1931,8 +1933,153 @@ fn draw() -> std::io::Result<()> {
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
+use serde::{Deserialize};
+
+#[derive(Deserialize, Serialize)]
+struct WrongPair {
+    input: Vec<i64>,
+    output: Vec<i64>,
+    task_id: String,
+    wrong_output: Vec<i64>,
+}
+
+#[derive(Serialize)]
+struct GroupedPair {
+    input: Vec<i64>,
+    output: Vec<i64>,
+    wrong_outputs: Vec<Vec<i64>>,
+}
+
+fn create_grid_html2(data: &[i64], columns: usize) -> String {
+    let mut grid_html = format!(
+        r#"<div class="grid" style="grid-template-columns: repeat({}, {}px);">"#,
+        columns, CELL_SIZE
+    );
+    
+    for &cell in data {
+        grid_html.push_str(&format!(r#"<div class="cell color-{}"></div>"#, cell));
+    }
+    grid_html.push_str("</div>");
+    grid_html
+}
+
+fn create_pair_html(input: &[i64], output: &[i64], wrong_outputs: &[Vec<i64>]) -> String {
+    let columns = input.len();
+    let mut html = String::new();
+    
+    // Input grid
+    html.push_str("<div class='grid-container'>");
+    html.push_str("<div class='task-title'>Input:</div>");
+    html.push_str(&create_grid_html2(input, columns));
+    
+    // Output grid
+    html.push_str("<div class='task-title'>Expected Output:</div>");
+    html.push_str(&create_grid_html2(output, columns));
+    
+    // Wrong outputs
+    html.push_str("<div class='task-title'>Wrong Outputs:</div>");
+    for wrong_output in wrong_outputs {
+        html.push_str(&create_grid_html2(wrong_output, wrong_output.len()));
+    }
+    
+    html.push_str("</div>");
+    html
+}
+
+fn create_task_html2(task_id: &str, pairs: &BTreeMap<String, GroupedPair>) -> String {
+    let mut task_html = format!(
+        r#"<div class="task">
+            <h3>{}</h3>
+            <div class="pairs-container">"#,
+        task_id
+    );
+    
+    for pair in pairs.values() {
+        task_html.push_str(&format!(
+            r#"<div class="subtask">{}</div>"#,
+            create_pair_html(&pair.input, &pair.output, &pair.wrong_outputs)
+        ));
+    }
+    
+    task_html.push_str("</div></div>");
+    task_html
+}
+
+fn generate_html(grouped_data: BTreeMap<String, BTreeMap<String, GroupedPair>>) -> String {
+    let mut html = format!(
+        r#"<!DOCTYPE html>
+        <html>
+        <head>
+            <title>Wrong Pairs Visualization</title>
+            <style>{}</style>
+        </head>
+        <body>
+            <h1>Wrong Pairs Visualization</h1>
+            <div class="task-container">"#,
+        CSS_TEMPLATE
+    );
+    
+    for (task_id, pairs) in grouped_data {
+        html.push_str(&create_task_html2(&task_id, &pairs));
+    }
+    
+    html.push_str(
+        r#"</div>
+        </body>
+        </html>"#
+    );
+    
+    html
+}
+
+fn process_data(data: Vec<WrongPair>) -> BTreeMap<String, BTreeMap<String, GroupedPair>> {
+    let mut grouped_data: BTreeMap<String, BTreeMap<String, GroupedPair>> = Default::default();
+    
+    for pair in data {
+        let clean_input = pair.input[2..pair.input.len()-2].to_vec();
+        let clean_output = pair.output[2..pair.output.len()-2].to_vec();
+        let clean_wrong_output = pair.wrong_output[2..pair.wrong_output.len()-2].to_vec();
+        
+        let task_pairs = grouped_data.entry(pair.task_id).or_insert_with(Default::default);
+        let key = format!("{:?}-{:?}", clean_input, clean_output);
+        
+        let group_pair = task_pairs.entry(key).or_insert(GroupedPair {
+            input: clean_input.clone(),
+            output: clean_output.clone(),
+            wrong_outputs: Vec::new(),
+        });
+        
+        group_pair.wrong_outputs.push(clean_wrong_output);
+    }
+    
+    grouped_data
+}
+
+fn draw_wrong_pairs() -> std::io::Result<()> {
+    let content = fs::read_to_string("../wrong_pairs.json")?;
+    let data: Vec<WrongPair> = serde_json::from_str(&content)?;
+    
+    let grouped_data = process_data(data);
+    let html = generate_html(grouped_data);
+    
+    let output_dir = Path::new("visualization");
+    fs::create_dir_all(output_dir)?;
+    
+    let mut file = File::create(output_dir.join("wrong_pairs.html"))?;
+    file.write_all(html.as_bytes())?;
+    
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+
 fn main() {
     color_backtrace::install();
+
+    // draw_wrong_pairs().unwrap();
+    // return;
 
     fs::create_dir_all("tasks").unwrap();
 
